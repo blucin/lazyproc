@@ -1,0 +1,40 @@
+# lazyproc.yaml — example dev/test config
+#
+# Run with:  go run ./cmd/lazyproc  (reads lazyproc.yaml in CWD by default)
+# Or:        go run ./cmd/lazyproc --config /path/to/lazyproc.yaml
+
+settings:
+  log_limit: 10000
+  shell: "/bin/sh"
+
+processes:
+  db:
+    cmd: "echo 'starting postgres...' && sleep 2 && echo 'database system is ready to accept connections' && sleep 9999"
+    ready_when:
+      stdout: "database system is ready to accept connections"
+
+  api:
+    cmd: "echo 'waiting for db...' && sleep 1 && echo 'listening on :8080' && sleep 9999"
+    depends_on:
+      - db
+    ready_when:
+      stdout: "listening on :8080"
+    highlight:
+      - pattern: "ERROR"
+        color: "red"
+      - pattern: "WARN"
+        color: "yellow"
+      - pattern: "INFO"
+        color: "cyan"
+
+  frontend:
+    cmd: "echo 'starting vite...' && sleep 1 && echo 'ready in 500ms' && sleep 9999"
+    depends_on:
+      - api
+    ready_when:
+      stdout: "ready in"
+    highlight:
+      - pattern: "error"
+        color: "red"
+      - pattern: "warning"
+        color: "yellow"

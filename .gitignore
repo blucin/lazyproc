@@ -27,6 +27,16 @@ go.work.sum
 # env file
 .env
 
+# air
+tmp/
+
 # Editor/IDE
-# .idea/
-# .vscode/
+.idea/
+.vscode/
+.zed/
+
+# direnv
+.direnv/
+
+# notes
+NOTE.md
