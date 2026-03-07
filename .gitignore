@@ -30,6 +30,9 @@ go.work.sum
 # air
 tmp/
 
+# debug logs
+debug.log
+
 # Editor/IDE
 .idea/
 .vscode/
