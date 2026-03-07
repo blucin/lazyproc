@@ -2,11 +2,11 @@ package ui
 
 import (
 	"fmt"
-	"log"
 	"strings"
 	"time"
 
 	"github.com/blucin/lazyproc/internal/config"
+	"github.com/blucin/lazyproc/internal/git"
 	"github.com/blucin/lazyproc/internal/process"
 	"github.com/charmbracelet/bubbles/help"
 	"github.com/charmbracelet/bubbles/key"
@@ -22,6 +22,7 @@ type focusPane int
 const (
 	focusSidebar focusPane = iota
 	focusViewport
+	focusWorktreePicker
 )
 
 // ── Bubbletea messages ────────────────────────────────────────────────────────
@@ -46,6 +47,13 @@ type TermSizeMsg struct {
 
 // tickMsg is used for periodic UI refresh (e.g. spinner animation).
 type tickMsg time.Time
+
+// worktreeSwitchCmd is returned by Init to detect git context on startup.
+type gitDetectMsg struct {
+	isGitRepo       bool
+	currentWorktree git.Worktree
+	worktrees       []git.Worktree
+}
 
 // ── Model ─────────────────────────────────────────────────────────────────────
 
@@ -83,6 +91,22 @@ type Model struct {
 	// autoScroll tracks whether the viewport should auto-scroll to the bottom
 	// when new output arrives.
 	autoScroll bool
+
+	// ── Git / worktree state ─────────────────────────────────────────────────
+
+	// isGitRepo is false when the CWD is not inside a git repo; worktree
+	// features are silently disabled in that case.
+	isGitRepo bool
+
+	// currentWorktree is the worktree that lazyproc was launched from.
+	currentWorktree git.Worktree
+
+	// availableWorktrees is the full list returned by git worktree list.
+	availableWorktrees []git.Worktree
+
+	// worktreePicker is the modal shown when the user presses 'w'.
+	// Only valid while focus == focusWorktreePicker.
+	picker worktreePicker
 }
 
 // NewModel constructs the root model from a parsed config.
@@ -138,6 +162,7 @@ func (m Model) Init() tea.Cmd {
 		tickCmd(),
 		listenCmd(m.msgCh),
 		startAllCmd(m.manager),
+		detectGitCmd(),
 	)
 }
 
@@ -153,8 +178,21 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	// ── Startup error ─────────────────────────────────────────────────────────
 	case errMsg:
 		// TODO: surface this in the UI properly; for now log it.
-		log.Printf("startup error: %v", msg.err)
 		_ = msg.err
+
+	// ── Git detection result ──────────────────────────────────────────────────
+	case gitDetectMsg:
+		m.isGitRepo = msg.isGitRepo
+		m.currentWorktree = msg.currentWorktree
+		m.availableWorktrees = msg.worktrees
+
+	// ── Worktree picker messages ──────────────────────────────────────────────
+	case worktreeSelectedMsg:
+		m.focus = focusSidebar
+		return m, switchWorktreeCmd(m.manager, msg.worktree.Path)
+
+	case worktreeDismissMsg:
+		m.focus = focusSidebar
 
 	// ── Terminal resize ───────────────────────────────────────────────────────
 	case tea.WindowSizeMsg:
@@ -179,6 +217,7 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	case ProcessStateMsg:
 		// Re-schedule the listener so the channel keeps being drained.
 		cmds = append(cmds, listenCmd(m.msgCh))
+		// No further action needed beyond a re-render (sidebar dots update).
 
 	// ── Periodic tick (spinner / refresh) ────────────────────────────────────
 	case tickMsg:
@@ -186,9 +225,17 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 
 	// ── Keyboard ──────────────────────────────────────────────────────────────
 	case tea.KeyMsg:
-		cmd := m.handleKey(msg)
-		if cmd != nil {
-			cmds = append(cmds, cmd)
+		// When the worktree picker is open, route all keys into it.
+		if m.focus == focusWorktreePicker {
+			cmd := m.picker.Update(msg)
+			if cmd != nil {
+				cmds = append(cmds, cmd)
+			}
+		} else {
+			cmd := m.handleKey(msg)
+			if cmd != nil {
+				cmds = append(cmds, cmd)
+			}
 		}
 	}
 
@@ -290,6 +337,13 @@ func (m *Model) handleKey(msg tea.KeyMsg) tea.Cmd {
 				m.refreshViewport()
 			}
 		}
+
+	// ── Worktree switcher ─────────────────────────────────────────────────────
+	case keyMatches(msg, m.keys.Worktree):
+		if m.isGitRepo && len(m.availableWorktrees) > 0 {
+			m.picker = newWorktreePicker(m.availableWorktrees, m.currentWorktree.Path)
+			m.focus = focusWorktreePicker
+		}
 	}
 
 	return nil
@@ -321,9 +375,28 @@ func (m Model) View() string {
 
 	body := lipgloss.JoinHorizontal(lipgloss.Top, sidebar, output)
 
+	header := m.renderHeader()
 	footer := m.renderFooter()
 
-	return lipgloss.JoinVertical(lipgloss.Left, body, footer)
+	base := lipgloss.JoinVertical(lipgloss.Left, header, body, footer)
+
+	// Overlay the worktree picker modal on top of the base layout when active.
+	if m.focus == focusWorktreePicker {
+		overlay := m.picker.View(m.width, m.height)
+		return overlayStrings(base, overlay)
+	}
+
+	return base
+}
+
+// renderHeader renders the top bar showing the app name and current branch.
+func (m Model) renderHeader() string {
+	title := StyleSidebarTitle.Render("lazyproc")
+	if m.isGitRepo && m.currentWorktree.Branch != "" {
+		branch := StyleBranchIndicator.Render(" " + m.currentWorktree.ShortBranch())
+		return StyleHelp.Width(m.width).Render(lipgloss.JoinHorizontal(lipgloss.Top, title, branch))
+	}
+	return StyleHelp.Width(m.width).Render(title)
 }
 
 // renderSidebar returns the rendered sidebar string.
@@ -411,13 +484,14 @@ func (m Model) renderFooter() string {
 // ── Helpers ───────────────────────────────────────────────────────────────────
 
 // bodyHeight returns the height available for the sidebar + viewport body,
-// excluding the footer.
+// excluding the header and footer.
 func (m Model) bodyHeight() int {
 	footerLines := 1
 	if m.showHelp {
 		footerLines = 4
 	}
-	h := m.height - footerLines
+	// 1 line for the header.
+	h := m.height - footerLines - 1
 	if h < 1 {
 		h = 1
 	}
@@ -524,6 +598,56 @@ func startAllCmd(mgr *process.Manager) tea.Cmd {
 	}
 }
 
+// detectGitCmd runs git detection in the background and sends a gitDetectMsg
+// back to the event loop. It never returns an error — if git is unavailable
+// or CWD is not a repo, isGitRepo is simply false.
+func detectGitCmd() tea.Cmd {
+	return func() tea.Msg {
+		worktrees, err := git.ListWorktrees(".")
+		if err != nil {
+			return gitDetectMsg{isGitRepo: false}
+		}
+		current, err := git.CurrentWorktree(".")
+		if err != nil {
+			return gitDetectMsg{isGitRepo: false}
+		}
+		return gitDetectMsg{
+			isGitRepo:       true,
+			currentWorktree: current,
+			worktrees:       worktrees,
+		}
+	}
+}
+
+// switchWorktreeCmd stops all processes, switches the worktree CWD, restarts
+// live processes, then returns a gitDetectMsg so Update can update the model's
+// git state cleanly without any shared-memory mutation from a goroutine.
+func switchWorktreeCmd(mgr *process.Manager, newPath string) tea.Cmd {
+	return func() tea.Msg {
+		if err := mgr.SwitchWorktree(newPath); err != nil {
+			return errMsg{err}
+		}
+		// Re-list all worktrees from the new path so the picker stays current.
+		worktrees, err := git.ListWorktrees(newPath)
+		if err != nil {
+			return errMsg{err}
+		}
+		// Find the Worktree entry that matches the new path.
+		var current git.Worktree
+		for _, wt := range worktrees {
+			if wt.Path == newPath {
+				current = wt
+				break
+			}
+		}
+		return gitDetectMsg{
+			isGitRepo:       true,
+			currentWorktree: current,
+			worktrees:       worktrees,
+		}
+	}
+}
+
 // errMsg carries an error back into the Bubbletea event loop.
 type errMsg struct{ err error }
 
@@ -556,4 +680,25 @@ func sortStrings(ss []string) {
 		}
 		ss[j+1] = key
 	}
+}
+
+// overlayStrings places overlay on top of base by replacing base's lines with
+// the non-empty lines from overlay. Both strings are split on "\n".
+func overlayStrings(base, overlay string) string {
+	baseLines := strings.Split(base, "\n")
+	overlayLines := strings.Split(overlay, "\n")
+
+	result := make([]string, len(baseLines))
+	copy(result, baseLines)
+
+	for i, ol := range overlayLines {
+		if i >= len(result) {
+			break
+		}
+		if strings.TrimSpace(ol) != "" {
+			result[i] = ol
+		}
+	}
+
+	return strings.Join(result, "\n")
 }

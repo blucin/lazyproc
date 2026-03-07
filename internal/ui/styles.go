@@ -152,3 +152,38 @@ var (
 			BorderStyle(lipgloss.NormalBorder()).
 			BorderForeground(colorBorder)
 )
+
+// ── Worktree picker modal ─────────────────────────────────────────────────────
+
+var (
+	// StyleModal is the outer box of the worktree picker overlay.
+	StyleModal = lipgloss.NewStyle().
+			BorderStyle(lipgloss.RoundedBorder()).
+			BorderForeground(colorHighlight).
+			Padding(0, 1)
+
+	StyleModalTitle = lipgloss.NewStyle().
+			Bold(true).
+			Foreground(colorHighlight).
+			Padding(0, 1)
+
+	StyleModalItem = lipgloss.NewStyle().
+			Padding(0, 1)
+
+	StyleModalItemSelected = lipgloss.NewStyle().
+				Padding(0, 1).
+				Background(colorHighlight).
+				Foreground(lipgloss.AdaptiveColor{Light: "#FFFFFF", Dark: "#1E1E2E"}).
+				Bold(true)
+
+	StyleModalHint = lipgloss.NewStyle().
+			Foreground(colorSubtle).
+			Padding(0, 1)
+)
+
+// ── Header ────────────────────────────────────────────────────────────────────
+
+var StyleBranchIndicator = lipgloss.NewStyle().
+	Foreground(colorSubtle).
+	Italic(true).
+	Padding(0, 1)

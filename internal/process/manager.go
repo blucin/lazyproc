@@ -2,6 +2,7 @@ package process
 
 import (
 	"fmt"
+	"path/filepath"
 	"sync"
 	"time"
 
@@ -22,6 +23,11 @@ type Manager struct {
 
 	shell  string
 	logCap int
+
+	// originalCwd stores the cwd value from the config file for each process,
+	// as it was at construction time. SwitchWorktree always resolves against
+	// this original value so that repeated switches don't compound paths.
+	originalCwd map[string]string
 }
 
 // NewManager constructs a Manager from the parsed config.
@@ -36,6 +42,7 @@ func NewManager(cfg *config.Config, onState StateChangeFunc, onOutput OutputFunc
 		onOutput:      onOutput,
 		shell:         cfg.Settings.Shell,
 		logCap:        cfg.Settings.LogLimit,
+		originalCwd:   make(map[string]string, len(cfg.Processes)),
 	}
 
 	for id, pcfg := range cfg.Processes {
@@ -47,6 +54,9 @@ func NewManager(cfg *config.Config, onState StateChangeFunc, onOutput OutputFunc
 			onState,
 			onOutput,
 		)
+		// Snapshot the cwd exactly as written in the config before any
+		// runtime mutations occur.
+		m.originalCwd[id] = pcfg.Cwd
 	}
 
 	return m
@@ -144,6 +154,94 @@ func (m *Manager) StopAll() {
 	}
 
 	wg.Wait()
+}
+
+// SwitchWorktree stops all processes, updates every process's working
+// directory to the new worktree root, clears their output buffers, then
+// restarts only the processes that were actively running or ready before the
+// switch (i.e. the ones the user had started). Processes that were stopped or
+// crashed are left stopped so the user's explicit stop choices are preserved.
+//
+// If a process has a relative cwd defined in its config, it is re-joined
+// against the new worktree root so it still resolves correctly in the new
+// tree.
+func (m *Manager) SwitchWorktree(newRoot string) error {
+	procs := m.Snapshot()
+
+	// Snapshot which processes were actively running before we stop anything.
+	type procEntry struct {
+		p       *Process
+		wasLive bool // true → should be restarted in the new worktree
+	}
+	entries := make([]procEntry, len(procs))
+	for i, p := range procs {
+		st := p.State()
+		entries[i] = procEntry{
+			p:       p,
+			wasLive: st == StateRunning || st == StateReady || st == StateStarting,
+		}
+	}
+
+	// Stop all processes concurrently.
+	var wg sync.WaitGroup
+	wg.Add(len(entries))
+	for _, e := range entries {
+		go func(proc *Process) {
+			defer wg.Done()
+			_ = proc.Stop(defaultGraceTimeout)
+		}(e.p)
+	}
+	wg.Wait()
+
+	// Update CWD and clear output for every process.
+	// We resolve against originalCwd (the value from the config file) rather
+	// than the current runtime cwd so that repeated switches don't compound
+	// paths (e.g. switching twice would otherwise keep appending to an already-
+	// absolute path set by the previous switch).
+	m.mu.RLock()
+	origCwds := make(map[*Process]string, len(entries))
+	for id, p := range m.processes {
+		origCwds[p] = m.originalCwd[id]
+	}
+	m.mu.RUnlock()
+
+	for _, e := range entries {
+		origCwd := origCwds[e.p]
+		var newCwd string
+		switch {
+		case origCwd == "":
+			// No cwd override in config — process runs at the worktree root.
+			newCwd = newRoot
+		case filepath.IsAbs(origCwd):
+			// Absolute path in config — leave it unchanged; it is not
+			// worktree-relative.
+			newCwd = origCwd
+		default:
+			// Relative path in config — re-join against the new worktree root.
+			newCwd = filepath.Join(newRoot, origCwd)
+		}
+		e.p.SetCwd(newCwd)
+		e.p.ClearOutput()
+	}
+
+	// Restart only the previously-live processes, respecting depends_on order.
+	liveProcs := make(map[string]*Process)
+	m.mu.RLock()
+	for id, p := range m.processes {
+		for _, e := range entries {
+			if e.p == p && e.wasLive {
+				liveProcs[id] = p
+				break
+			}
+		}
+	}
+	m.mu.RUnlock()
+
+	if len(liveProcs) == 0 {
+		return nil
+	}
+
+	return startOrdered(liveProcs)
 }
 
 // startOrdered starts processes respecting depends_on ordering.

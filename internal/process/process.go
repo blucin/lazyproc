@@ -310,3 +310,18 @@ func (p *Process) Restart(graceTimeout time.Duration) error {
 func (p *Process) ClearOutput() {
 	p.Output.Clear()
 }
+
+// Cwd returns the current working directory configured for this process (thread-safe).
+func (p *Process) Cwd() string {
+	p.mu.Lock()
+	defer p.mu.Unlock()
+	return p.cfg.Cwd
+}
+
+// SetCwd updates the working directory used for future Start calls.
+// It has no effect on a currently running process.
+func (p *Process) SetCwd(cwd string) {
+	p.mu.Lock()
+	defer p.mu.Unlock()
+	p.cfg.Cwd = cwd
+}

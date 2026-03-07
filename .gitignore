@@ -24,6 +24,9 @@ profile.cov
 go.work
 go.work.sum
 
+# test folder (for testing the cli on real projects)
+test/
+
 # env file
 .env
 
