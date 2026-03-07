@@ -2,6 +2,7 @@ package ui
 
 import (
 	"fmt"
+	"log"
 	"strings"
 	"time"
 
@@ -54,6 +55,10 @@ type Model struct {
 	cfg     *config.Config
 	manager *process.Manager
 
+	// msgCh is a buffered channel written to by process manager callbacks
+	// (goroutines) and drained by the Bubbletea event loop via listenCmd.
+	msgCh chan tea.Msg
+
 	// Ordered list of process IDs shown in the sidebar (stable sort).
 	procIDs []string
 
@@ -82,15 +87,24 @@ type Model struct {
 
 // NewModel constructs the root model from a parsed config.
 // It wires up state-change and output callbacks so the Bubbletea program
-// receives messages from background goroutines.
+// receives messages from background goroutines via a shared channel.
 func NewModel(cfg *config.Config) Model {
-	// We need a reference to the tea.Program to send messages, but at
-	// construction time we don't have one yet. We store channels here and
-	// inject them via WithProgram after tea.NewProgram is created.
-	// For now the callbacks are left nil; they are set in Init via commands.
+	// msgCh is the bridge between background goroutines (process manager
+	// callbacks) and the Bubbletea event loop. The channel is buffered so
+	// that callbacks never block the pipe-reader goroutines.
+	msgCh := make(chan tea.Msg, 256)
+
+	onState := func(id string, state process.State) {
+		msgCh <- ProcessStateMsg{ID: id, State: state}
+	}
+	onOutput := func(id string, line process.OutputLine) {
+		msgCh <- ProcessOutputMsg{ID: id, Line: line}
+	}
 
 	m := Model{
 		cfg:        cfg,
+		manager:    process.NewManager(cfg, onState, onOutput),
+		msgCh:      msgCh,
 		keys:       DefaultKeyMap(),
 		help:       help.New(),
 		autoScroll: true,
@@ -122,6 +136,8 @@ func (m Model) Init() tea.Cmd {
 	return tea.Batch(
 		tea.EnterAltScreen,
 		tickCmd(),
+		listenCmd(m.msgCh),
+		startAllCmd(m.manager),
 	)
 }
 
@@ -134,6 +150,12 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 
 	switch msg := msg.(type) {
 
+	// ── Startup error ─────────────────────────────────────────────────────────
+	case errMsg:
+		// TODO: surface this in the UI properly; for now log it.
+		log.Printf("startup error: %v", msg.err)
+		_ = msg.err
+
 	// ── Terminal resize ───────────────────────────────────────────────────────
 	case tea.WindowSizeMsg:
 		m.width = msg.Width
@@ -142,6 +164,8 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 
 	// ── Process output ────────────────────────────────────────────────────────
 	case ProcessOutputMsg:
+		// Re-schedule the listener so the channel keeps being drained.
+		cmds = append(cmds, listenCmd(m.msgCh))
 		// If the arriving output belongs to the currently selected process,
 		// refresh the viewport content.
 		if msg.ID == m.selectedID() {
@@ -153,8 +177,8 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 
 	// ── Process state change ──────────────────────────────────────────────────
 	case ProcessStateMsg:
-		// Re-render sidebar to reflect the new state dot / label.
-		// No explicit action needed beyond a re-render (return m).
+		// Re-schedule the listener so the channel keeps being drained.
+		cmds = append(cmds, listenCmd(m.msgCh))
 
 	// ── Periodic tick (spinner / refresh) ────────────────────────────────────
 	case tickMsg:
@@ -477,6 +501,31 @@ func tickCmd() tea.Cmd {
 		return tickMsg(t)
 	})
 }
+
+// listenCmd returns a command that blocks until the next message arrives on
+// ch, forwards it into the Bubbletea event loop, then re-schedules itself so
+// the channel is drained continuously for the lifetime of the program.
+func listenCmd(ch chan tea.Msg) tea.Cmd {
+	return func() tea.Msg {
+		msg := <-ch
+		return msg
+	}
+}
+
+// startAllCmd returns a command that calls manager.StartAll() in the
+// background and reports any startup error back to the event loop as an
+// errMsg so it can be surfaced in the UI rather than silently swallowed.
+func startAllCmd(mgr *process.Manager) tea.Cmd {
+	return func() tea.Msg {
+		if err := mgr.StartAll(); err != nil {
+			return errMsg{err}
+		}
+		return nil
+	}
+}
+
+// errMsg carries an error back into the Bubbletea event loop.
+type errMsg struct{ err error }
 
 // ── Key helper ────────────────────────────────────────────────────────────────
 
