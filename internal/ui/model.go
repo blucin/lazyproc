@@ -370,15 +370,15 @@ func (m Model) View() string {
 		return ""
 	}
 
-	sidebar := m.renderSidebar()
-	output := m.renderOutputPane()
-
-	body := lipgloss.JoinHorizontal(lipgloss.Top, sidebar, output)
-
-	header := m.renderHeader()
+	body := m.renderBody()
 	footer := m.renderFooter()
 
-	base := lipgloss.JoinVertical(lipgloss.Left, header, body, footer)
+	var base string
+	if footer == "" {
+		base = body
+	} else {
+		base = lipgloss.JoinVertical(lipgloss.Left, body, footer)
+	}
 
 	// Overlay the worktree picker modal on top of the base layout when active.
 	if m.focus == focusWorktreePicker {
@@ -389,27 +389,46 @@ func (m Model) View() string {
 	return base
 }
 
-// renderHeader renders the top bar showing the app name and current branch.
-func (m Model) renderHeader() string {
-	title := StyleSidebarTitle.Render("lazyproc")
-	if m.isGitRepo && m.currentWorktree.Branch != "" {
-		branch := StyleBranchIndicator.Render(" " + m.currentWorktree.ShortBranch())
-		return StyleHelp.Width(m.width).Render(lipgloss.JoinHorizontal(lipgloss.Top, title, branch))
+// renderBody renders the main area: a single outer border box containing the
+// sidebar (right-border only as divider) and the viewport side by side.
+func (m Model) renderBody() string {
+	innerH := m.bodyHeight() - 2 // subtract outer top + bottom border
+	if innerH < 1 {
+		innerH = 1
 	}
-	return StyleHelp.Width(m.width).Render(title)
-}
 
-// renderSidebar returns the rendered sidebar string.
-func (m Model) renderSidebar() string {
+	// ── Labels row ────────────────────────────────────────────────────────
+	// When enabled, the first content row of each pane is a title label.
+	labelRows := 0
+	if m.cfg.LabelsEnabled() {
+		labelRows = 1
+	}
+	// Content rows available to the process list and viewport after labels.
+	contentH := innerH - labelRows
+	if contentH < 1 {
+		contentH = 1
+	}
+
+	// ── Sidebar ───────────────────────────────────────────────────────────
+	// Right border acts as the vertical divider between the two panes.
+	dividerColor := colorBorder
+	sidebarStyle := lipgloss.NewStyle().
+		Width(sidebarWidth).
+		Height(innerH).
+		BorderStyle(lipgloss.NormalBorder()).
+		BorderRight(true).
+		BorderForeground(dividerColor)
+
 	var sb strings.Builder
-
-	title := StyleSidebarTitle.Render("processes")
-	sb.WriteString(title + "\n")
-
+	if m.cfg.LabelsEnabled() {
+		sb.WriteString(StyleSidebarLabel.Width(sidebarWidth).Render("processes") + "\n")
+	}
 	for i, id := range m.procIDs {
+		if i >= contentH {
+			break
+		}
 		dot := "●"
 		dotStyle := StyleDotStopped
-
 		if m.manager != nil {
 			if p := m.manager.Get(id); p != nil {
 				switch p.State() {
@@ -426,52 +445,52 @@ func (m Model) renderSidebar() string {
 				}
 			}
 		}
-
-		dotStr := dotStyle.Render(dot)
-		label := fmt.Sprintf(" %s %s", dotStr, id)
-
+		label := fmt.Sprintf(" %s %s", dotStyle.Render(dot), id)
 		if i == m.selectedIdx {
 			label = StyleSidebarItemSelected.Render(label)
 		} else {
 			label = StyleSidebarItem.Render(label)
 		}
-
 		sb.WriteString(label + "\n")
 	}
+	sidebar := sidebarStyle.Render(strings.TrimRight(sb.String(), "\n"))
 
-	sidebarHeight := m.bodyHeight()
-	content := sb.String()
-
-	return StyleSidebar.
-		Height(sidebarHeight).
-		Render(content)
-}
-
-// renderOutputPane returns the viewport pane as a string.
-func (m Model) renderOutputPane() string {
-	id := m.selectedID()
-	title := StyleViewportTitle.Render(fmt.Sprintf("output: %s", id))
-
-	vpWidth := m.width - sidebarWidth - 2 // -2 for border
-	if vpWidth < 1 {
-		vpWidth = 1
+	// ── Viewport ──────────────────────────────────────────────────────────
+	// No border of its own — the outer box provides top/bottom/right edges.
+	var vpContent strings.Builder
+	if m.cfg.LabelsEnabled() {
+		procName := m.selectedID()
+		if procName == "" {
+			procName = "logs"
+		}
+		vpContent.WriteString(StyleViewportLabel.Width(m.vp.Width).Render(procName) + "\n")
 	}
+	vpContent.WriteString(m.vp.View())
+	viewport := lipgloss.NewStyle().
+		Width(m.vp.Width).
+		Height(innerH).
+		Render(vpContent.String())
 
-	pane := lipgloss.JoinVertical(lipgloss.Left,
-		title,
-		m.vp.View(),
-	)
+	// ── Outer box ─────────────────────────────────────────────────────────
+	// Wraps sidebar+viewport in a single border so lipgloss computes all
+	// corners and edge characters correctly with no manual stitching.
+	outerW := m.width - 2 // subtract outer left + right border
+	inner := lipgloss.JoinHorizontal(lipgloss.Top, sidebar, viewport)
+	outer := lipgloss.NewStyle().
+		Width(outerW).
+		BorderStyle(lipgloss.NormalBorder()).
+		BorderForeground(colorBorder).
+		Render(inner)
 
-	borderStyle := StyleDim
-	if m.focus == focusViewport {
-		borderStyle = StyleFocused
-	}
-
-	return borderStyle.Width(vpWidth).Render(pane)
+	return outer
 }
 
 // renderFooter renders the help bar at the bottom of the screen.
+// Returns an empty string when the help bar is disabled in config.
 func (m Model) renderFooter() string {
+	if !m.cfg.HelpEnabled() {
+		return ""
+	}
 	var helpView string
 	if m.showHelp {
 		helpView = m.help.View(m.keys)
@@ -483,15 +502,18 @@ func (m Model) renderFooter() string {
 
 // ── Helpers ───────────────────────────────────────────────────────────────────
 
-// bodyHeight returns the height available for the sidebar + viewport body,
-// excluding the header and footer.
+// bodyHeight returns the height available for the body box (including its own
+// top and bottom border lines), excluding the footer.
 func (m Model) bodyHeight() int {
-	footerLines := 1
-	if m.showHelp {
-		footerLines = 4
+	footerLines := 0
+	if m.cfg.HelpEnabled() {
+		if m.showHelp {
+			footerLines = 4
+		} else {
+			footerLines = 1
+		}
 	}
-	// 1 line for the header.
-	h := m.height - footerLines - 1
+	h := m.height - footerLines
 	if h < 1 {
 		h = 1
 	}
@@ -501,8 +523,16 @@ func (m Model) bodyHeight() int {
 // resizeViewport recalculates the viewport dimensions after a terminal resize
 // or help-bar toggle.
 func (m *Model) resizeViewport() {
-	vpWidth := m.width - sidebarWidth - 4 // sidebar + borders
-	vpHeight := m.bodyHeight() - 2        // title row + border
+	// Outer box: 2 border cols (left+right).
+	// Sidebar: sidebarWidth cols + 1 divider border col.
+	vpWidth := m.width - sidebarWidth - 3
+	// Outer box: 2 border rows (top+bottom).
+	// Labels row: 1 row when labels are enabled.
+	labelRows := 0
+	if m.cfg.LabelsEnabled() {
+		labelRows = 1
+	}
+	vpHeight := m.bodyHeight() - 2 - labelRows
 
 	if vpWidth < 1 {
 		vpWidth = 1

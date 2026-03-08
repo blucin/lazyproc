@@ -32,6 +32,12 @@ type Process struct {
 type Settings struct {
 	LogLimit int    `yaml:"log_limit"`
 	Shell    string `yaml:"shell"`
+	// ShowHelp controls whether the help bar is rendered at the bottom.
+	// Defaults to true when omitted from config.
+	ShowHelp *bool `yaml:"show_help"`
+	// ShowLabels controls whether the "processes" / process-name label row
+	// is rendered inside each pane. Defaults to true when omitted from config.
+	ShowLabels *bool `yaml:"show_labels"`
 }
 
 // Config is the top-level structure parsed from lazyproc.yaml.
@@ -48,6 +54,14 @@ func (c *Config) defaults() {
 	if c.Settings.Shell == "" {
 		c.Settings.Shell = "/bin/sh"
 	}
+	if c.Settings.ShowHelp == nil {
+		t := true
+		c.Settings.ShowHelp = &t
+	}
+	if c.Settings.ShowLabels == nil {
+		t := true
+		c.Settings.ShowLabels = &t
+	}
 }
 
 // validate performs basic sanity checks on the parsed config.
@@ -63,6 +77,16 @@ func (c *Config) validate() error {
 		}
 	}
 	return nil
+}
+
+// HelpEnabled reports whether the help bar should be shown.
+func (c *Config) HelpEnabled() bool {
+	return c.Settings.ShowHelp != nil && *c.Settings.ShowHelp
+}
+
+// LabelsEnabled reports whether pane labels should be shown.
+func (c *Config) LabelsEnabled() bool {
+	return c.Settings.ShowLabels != nil && *c.Settings.ShowLabels
 }
 
 // Load reads and parses a lazyproc.yaml config file from the given path.

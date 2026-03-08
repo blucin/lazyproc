@@ -32,13 +32,7 @@ const (
 // ── Sidebar ──────────────────────────────────────────────────────────────────
 
 var (
-	StyleSidebar = lipgloss.NewStyle().
-			Width(sidebarWidth).
-			BorderStyle(lipgloss.NormalBorder()).
-			BorderRight(true).
-			BorderForeground(colorBorder)
-
-	StyleSidebarTitle = lipgloss.NewStyle().
+	StyleSidebarLabel = lipgloss.NewStyle().
 				Bold(true).
 				Foreground(colorHighlight).
 				Padding(0, 1)
@@ -51,13 +45,14 @@ var (
 					Background(colorHighlight).
 					Foreground(lipgloss.AdaptiveColor{Light: "#FFFFFF", Dark: "#1E1E2E"}).
 					Bold(true)
-
-	StyleSidebarItemName = lipgloss.NewStyle().
-				Foreground(colorPrimary)
-
-	StyleSidebarItemNameSelected = lipgloss.NewStyle().
-					Foreground(lipgloss.AdaptiveColor{Light: "#FFFFFF", Dark: "#1E1E2E"})
 )
+
+// ── Viewport label ────────────────────────────────────────────────────────────
+
+var StyleViewportLabel = lipgloss.NewStyle().
+	Bold(true).
+	Foreground(colorSubtle).
+	Padding(0, 1)
 
 // ── Status dots ──────────────────────────────────────────────────────────────
 
@@ -68,31 +63,6 @@ var (
 	StyleDotReady      = lipgloss.NewStyle().Foreground(colorReady)
 	StyleDotCrashed    = lipgloss.NewStyle().Foreground(colorCrashed)
 	StyleDotRestarting = lipgloss.NewStyle().Foreground(colorRestarting)
-)
-
-// ── Header ───────────────────────────────────────────────────────────────────
-
-var (
-	StyleHeader = lipgloss.NewStyle().
-			Bold(true).
-			Foreground(colorHighlight).
-			Padding(0, 1)
-
-	StyleHeaderBranch = lipgloss.NewStyle().
-				Foreground(colorSubtle).
-				Italic(true)
-)
-
-// ── Viewport / output pane ───────────────────────────────────────────────────
-
-var (
-	StyleViewport = lipgloss.NewStyle().
-			Padding(0, 1)
-
-	StyleViewportTitle = lipgloss.NewStyle().
-				Bold(true).
-				Foreground(colorHighlight).
-				Padding(0, 1)
 )
 
 // ── Output line highlight colours ────────────────────────────────────────────
@@ -139,20 +109,6 @@ var (
 			Foreground(colorSubtle)
 )
 
-// ── Misc ─────────────────────────────────────────────────────────────────────
-
-var (
-	// StyleFocused is applied to the currently focused pane border.
-	StyleFocused = lipgloss.NewStyle().
-			BorderStyle(lipgloss.NormalBorder()).
-			BorderForeground(colorHighlight)
-
-	// StyleDim is applied to panes that are not focused.
-	StyleDim = lipgloss.NewStyle().
-			BorderStyle(lipgloss.NormalBorder()).
-			BorderForeground(colorBorder)
-)
-
 // ── Worktree picker modal ─────────────────────────────────────────────────────
 
 var (
@@ -180,10 +136,3 @@ var (
 			Foreground(colorSubtle).
 			Padding(0, 1)
 )
-
-// ── Header ────────────────────────────────────────────────────────────────────
-
-var StyleBranchIndicator = lipgloss.NewStyle().
-	Foreground(colorSubtle).
-	Italic(true).
-	Padding(0, 1)
