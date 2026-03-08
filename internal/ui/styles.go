@@ -6,7 +6,6 @@ import "github.com/charmbracelet/lipgloss"
 // Using adaptive colours so the UI looks reasonable on both light and dark
 // terminals.
 var (
-	colorPrimary   = lipgloss.AdaptiveColor{Light: "#1A1A2E", Dark: "#CDD6F4"}
 	colorSubtle    = lipgloss.AdaptiveColor{Light: "#666666", Dark: "#6C7086"}
 	colorHighlight = lipgloss.AdaptiveColor{Light: "#0066CC", Dark: "#89B4FA"}
 	colorBorder    = lipgloss.AdaptiveColor{Light: "#CCCCCC", Dark: "#313244"}
@@ -22,21 +21,11 @@ var (
 
 // ── Layout dimensions ───────────────────────────────────────────────────────
 
-const (
-	sidebarWidth  = 28
-	headerHeight  = 1
-	footerHeight  = 1
-	statusDotRune = "●"
-)
+const sidebarWidth = 28
 
 // ── Sidebar ──────────────────────────────────────────────────────────────────
 
 var (
-	StyleSidebarLabel = lipgloss.NewStyle().
-				Bold(true).
-				Foreground(colorHighlight).
-				Padding(0, 1)
-
 	StyleSidebarItem = lipgloss.NewStyle().
 				Padding(0, 1)
 
@@ -46,13 +35,6 @@ var (
 					Foreground(lipgloss.AdaptiveColor{Light: "#FFFFFF", Dark: "#1E1E2E"}).
 					Bold(true)
 )
-
-// ── Viewport label ────────────────────────────────────────────────────────────
-
-var StyleViewportLabel = lipgloss.NewStyle().
-	Bold(true).
-	Foreground(colorSubtle).
-	Padding(0, 1)
 
 // ── Status dots ──────────────────────────────────────────────────────────────
 

@@ -397,34 +397,18 @@ func (m Model) renderBody() string {
 		innerH = 1
 	}
 
-	// ── Labels row ────────────────────────────────────────────────────────
-	// When enabled, the first content row of each pane is a title label.
-	labelRows := 0
-	if m.cfg.LabelsEnabled() {
-		labelRows = 1
-	}
-	// Content rows available to the process list and viewport after labels.
-	contentH := innerH - labelRows
-	if contentH < 1 {
-		contentH = 1
-	}
-
 	// ── Sidebar ───────────────────────────────────────────────────────────
 	// Right border acts as the vertical divider between the two panes.
-	dividerColor := colorBorder
 	sidebarStyle := lipgloss.NewStyle().
 		Width(sidebarWidth).
 		Height(innerH).
 		BorderStyle(lipgloss.NormalBorder()).
 		BorderRight(true).
-		BorderForeground(dividerColor)
+		BorderForeground(colorBorder)
 
 	var sb strings.Builder
-	if m.cfg.LabelsEnabled() {
-		sb.WriteString(StyleSidebarLabel.Width(sidebarWidth).Render("processes") + "\n")
-	}
 	for i, id := range m.procIDs {
-		if i >= contentH {
+		if i >= innerH {
 			break
 		}
 		dot := "●"
@@ -457,32 +441,68 @@ func (m Model) renderBody() string {
 
 	// ── Viewport ──────────────────────────────────────────────────────────
 	// No border of its own — the outer box provides top/bottom/right edges.
-	var vpContent strings.Builder
-	if m.cfg.LabelsEnabled() {
-		procName := m.selectedID()
-		if procName == "" {
-			procName = "logs"
-		}
-		vpContent.WriteString(StyleViewportLabel.Width(m.vp.Width).Render(procName) + "\n")
-	}
-	vpContent.WriteString(m.vp.View())
 	viewport := lipgloss.NewStyle().
 		Width(m.vp.Width).
 		Height(innerH).
-		Render(vpContent.String())
+		Render(m.vp.View())
 
 	// ── Outer box ─────────────────────────────────────────────────────────
-	// Wraps sidebar+viewport in a single border so lipgloss computes all
-	// corners and edge characters correctly with no manual stitching.
+	// Wraps sidebar+viewport in a single border. When labels are enabled we
+	// build a custom Border whose Top string embeds the pane titles so that
+	// no content rows are consumed by labels.
 	outerW := m.width - 2 // subtract outer left + right border
 	inner := lipgloss.JoinHorizontal(lipgloss.Top, sidebar, viewport)
+	b := m.buildBorder(outerW)
 	outer := lipgloss.NewStyle().
 		Width(outerW).
-		BorderStyle(lipgloss.NormalBorder()).
+		BorderStyle(b).
 		BorderForeground(colorBorder).
 		Render(inner)
 
 	return outer
+}
+
+// buildBorder returns a lipgloss.Border for the outer body box.
+// When labels are enabled the Top field is replaced with a pre-built string
+// that embeds "─ processes ─┬─ <procname> ─" into the top border line.
+// lipgloss uses the Top string as a tile source — because our string is
+// already exactly outerW runes wide it is used verbatim with no tiling.
+func (m Model) buildBorder(outerW int) lipgloss.Border {
+	b := lipgloss.NormalBorder()
+	if !m.cfg.LabelsEnabled() {
+		return b
+	}
+
+	leftW := sidebarWidth // includes the divider │ column
+	rightW := outerW - leftW
+
+	// Left segment: "─ processes ─────" padded to leftW runes.
+	const sidebarTitle = " processes "
+	leftSeg := buildTitleSegment(sidebarTitle, leftW, b.Top)
+
+	// Right segment: " <procname> ─────" padded to rightW runes.
+	procName := m.selectedID()
+	if procName == "" {
+		procName = "logs"
+	}
+	rightSeg := buildTitleSegment(" "+procName+" ", rightW, b.Top)
+
+	b.Top = leftSeg + rightSeg
+	return b
+}
+
+// buildTitleSegment builds a border segment of exactly width runes consisting
+// of a title string centred (left-biased) in a field of fill characters.
+func buildTitleSegment(title string, width int, fill string) string {
+	titleW := len([]rune(title))
+	dashW := width - titleW
+	if dashW < 0 {
+		// Title longer than segment — truncate.
+		return string([]rune(title)[:width])
+	}
+	left := dashW / 2
+	right := dashW - left
+	return strings.Repeat(fill, left) + title + strings.Repeat(fill, right)
 }
 
 // renderFooter renders the help bar at the bottom of the screen.
@@ -527,12 +547,8 @@ func (m *Model) resizeViewport() {
 	// Sidebar: sidebarWidth cols + 1 divider border col.
 	vpWidth := m.width - sidebarWidth - 3
 	// Outer box: 2 border rows (top+bottom).
-	// Labels row: 1 row when labels are enabled.
-	labelRows := 0
-	if m.cfg.LabelsEnabled() {
-		labelRows = 1
-	}
-	vpHeight := m.bodyHeight() - 2 - labelRows
+	// Labels are in the border itself — no content rows deducted.
+	vpHeight := m.bodyHeight() - 2
 
 	if vpWidth < 1 {
 		vpWidth = 1
