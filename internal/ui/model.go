@@ -1,6 +1,7 @@
 package ui
 
 import (
+	"encoding/base64"
 	"fmt"
 	"path/filepath"
 	"strings"
@@ -92,6 +93,20 @@ type Model struct {
 	// autoScroll tracks whether the viewport should auto-scroll to the bottom
 	// when new output arrives.
 	autoScroll bool
+
+	// ── Cursor / selection state ──────────────────────────────────────────────
+
+	// cursorLine is the index into the current process's output lines that the
+	// cursor sits on. Always visible when the viewport is focused (dim), and
+	// used as the anchor when selection mode starts.
+	cursorLine int
+
+	// selecting is true while the user is in visual selection mode (after 'v').
+	selecting bool
+
+	// selAnchor is the line index where 'v' was pressed. The selected range is
+	// always [min(selAnchor,cursorLine), max(selAnchor,cursorLine)].
+	selAnchor int
 
 	// ── Git / worktree state ─────────────────────────────────────────────────
 
@@ -240,6 +255,12 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		// If the arriving output belongs to the currently selected process,
 		// refresh the viewport content.
 		if msg.ID == m.selectedID() {
+			if m.autoScroll && !m.selecting {
+				n := m.outputLen()
+				if n > 0 {
+					m.cursorLine = n - 1
+				}
+			}
 			m.refreshViewport()
 			if m.autoScroll {
 				m.vp.GotoBottom()
@@ -272,16 +293,6 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		}
 	}
 
-	// Forward remaining messages to the viewport when it has focus so
-	// bubbles/viewport can handle its own scroll state.
-	if m.focus == focusViewport {
-		var vpCmd tea.Cmd
-		m.vp, vpCmd = m.vp.Update(msg)
-		if vpCmd != nil {
-			cmds = append(cmds, vpCmd)
-		}
-	}
-
 	return m, tea.Batch(cmds...)
 }
 
@@ -303,51 +314,63 @@ func (m *Model) handleKey(msg tea.KeyMsg) tea.Cmd {
 
 	// ── Switch pane focus ─────────────────────────────────────────────────────
 	case keyMatches(msg, m.keys.FocusNext):
+		m.selecting = false
 		if m.focus == focusSidebar {
 			m.focus = focusViewport
 		} else {
 			m.focus = focusSidebar
 		}
 
-	// ── Sidebar navigation ────────────────────────────────────────────────────
+	// ── Up ────────────────────────────────────────────────────────────────────
 	case keyMatches(msg, m.keys.Up):
 		if m.focus == focusSidebar {
 			m.moveSidebar(-1)
 			return m.redetectGitCmd()
 		} else {
-			m.vp.LineUp(1)
-			m.autoScroll = false
+			m.moveCursor(-1)
 		}
 
+	// ── Down ──────────────────────────────────────────────────────────────────
 	case keyMatches(msg, m.keys.Down):
 		if m.focus == focusSidebar {
 			m.moveSidebar(1)
 			return m.redetectGitCmd()
 		} else {
-			m.vp.LineDown(1)
-			// Re-enable auto-scroll when the user scrolls to the bottom.
-			if m.vp.AtBottom() {
-				m.autoScroll = true
-			}
+			m.moveCursor(1)
 		}
 
 	case keyMatches(msg, m.keys.PageUp):
-		m.vp.HalfViewUp()
-		m.autoScroll = false
+		m.moveCursor(-m.vp.Height / 2)
 
 	case keyMatches(msg, m.keys.PageDown):
-		m.vp.HalfViewDown()
-		if m.vp.AtBottom() {
-			m.autoScroll = true
-		}
+		m.moveCursor(m.vp.Height / 2)
 
 	case keyMatches(msg, m.keys.GotoTop):
-		m.vp.GotoTop()
-		m.autoScroll = false
+		m.moveCursor(-m.outputLen())
 
 	case keyMatches(msg, m.keys.GotoBottom):
-		m.vp.GotoBottom()
-		m.autoScroll = true
+		m.moveCursor(m.outputLen())
+
+	// ── Selection ─────────────────────────────────────────────────────────────
+	case keyMatches(msg, m.keys.Select):
+		if m.focus == focusViewport {
+			if m.selecting {
+				m.selecting = false
+			} else {
+				m.selecting = true
+				m.selAnchor = m.cursorLine
+			}
+			m.refreshViewport()
+		}
+
+	case keyMatches(msg, m.keys.Yank):
+		if m.selecting {
+			return m.yankSelection()
+		}
+
+	case keyMatches(msg, m.keys.Escape):
+		m.selecting = false
+		m.refreshViewport()
 
 	// ── Process control ───────────────────────────────────────────────────────
 	case keyMatches(msg, m.keys.Start):
@@ -369,6 +392,8 @@ func (m *Model) handleKey(msg tea.KeyMsg) tea.Cmd {
 		if m.manager != nil && m.selectedID() != "" {
 			if p := m.manager.Get(m.selectedID()); p != nil {
 				p.ClearOutput()
+				m.cursorLine = 0
+				m.selecting = false
 				m.refreshViewport()
 			}
 		}
@@ -382,6 +407,76 @@ func (m *Model) handleKey(msg tea.KeyMsg) tea.Cmd {
 	}
 
 	return nil
+}
+
+// moveCursor moves cursorLine by delta, clamps to output bounds, scrolls the
+// viewport to keep the cursor visible, and refreshes content.
+func (m *Model) moveCursor(delta int) {
+	n := m.outputLen()
+	if n == 0 {
+		return
+	}
+	m.cursorLine = clamp(m.cursorLine+delta, 0, n-1)
+	m.autoScroll = m.cursorLine == n-1
+	m.scrollToCursor()
+	m.refreshViewport()
+}
+
+// scrollToCursor adjusts the viewport offset so cursorLine is visible.
+func (m *Model) scrollToCursor() {
+	// viewport.YOffset is the index of the first visible line.
+	top := m.vp.YOffset
+	bottom := top + m.vp.Height - 1
+	if m.cursorLine < top {
+		m.vp.SetYOffset(m.cursorLine)
+	} else if m.cursorLine > bottom {
+		m.vp.SetYOffset(m.cursorLine - m.vp.Height + 1)
+	}
+}
+
+// outputLen returns the number of lines in the selected process's output.
+func (m *Model) outputLen() int {
+	id := m.selectedID()
+	if id == "" || m.manager == nil {
+		return 0
+	}
+	p := m.manager.Get(id)
+	if p == nil {
+		return 0
+	}
+	return len(p.Output.Lines())
+}
+
+// yankSelection copies the selected lines to the clipboard via OSC 52 and
+// exits selection mode.
+func (m *Model) yankSelection() tea.Cmd {
+	id := m.selectedID()
+	if id == "" || m.manager == nil {
+		return nil
+	}
+	p := m.manager.Get(id)
+	if p == nil {
+		return nil
+	}
+	lines := p.Output.Lines()
+	lo := clamp(min(m.selAnchor, m.cursorLine), 0, len(lines)-1)
+	hi := clamp(max(m.selAnchor, m.cursorLine), 0, len(lines)-1)
+
+	selected := strings.Join(lines[lo:hi+1], "\n")
+	m.selecting = false
+	m.refreshViewport()
+	return osc52Cmd(selected)
+}
+
+// osc52Cmd writes an OSC 52 clipboard escape sequence to stdout. This works
+// in most modern terminal emulators and over SSH (with AllowTcpForwarding).
+func osc52Cmd(text string) tea.Cmd {
+	return func() tea.Msg {
+		b64 := base64Encode(text)
+		// OSC 52 ; c ; <base64> ST
+		fmt.Printf("\x1b]52;c;%s\x07", b64)
+		return nil
+	}
 }
 
 // moveSidebar moves the sidebar selection by delta, clamping to valid range.
@@ -424,23 +519,22 @@ func (m Model) View() string {
 	return base
 }
 
-// renderBody renders the main area: a single outer border box containing the
-// sidebar (right-border only as divider) and the viewport side by side.
+// renderBody renders two independent card boxes side by side: the process
+// sidebar on the left and the output viewport on the right. Each card gets its
+// own full border that is highlighted when that pane has focus.
 func (m Model) renderBody() string {
-	innerH := m.bodyHeight() - 2 // subtract outer top + bottom border
+	// Each card has a top + bottom border row, so inner content height is 2
+	// less than the total body height.
+	cardH := m.bodyHeight()
+	innerH := cardH - 2
 	if innerH < 1 {
 		innerH = 1
 	}
 
-	// ── Sidebar ───────────────────────────────────────────────────────────
-	// Right border acts as the vertical divider between the two panes.
-	sidebarStyle := lipgloss.NewStyle().
-		Width(sidebarWidth).
-		Height(innerH).
-		BorderStyle(lipgloss.NormalBorder()).
-		BorderRight(true).
-		BorderForeground(colorBorder)
+	sidebarFocused := m.focus == focusSidebar
+	viewportFocused := m.focus == focusViewport
 
+	// ── Sidebar card ──────────────────────────────────────────────────────
 	var sb strings.Builder
 	for i, id := range m.procIDs {
 		if i >= innerH {
@@ -472,72 +566,60 @@ func (m Model) renderBody() string {
 		}
 		sb.WriteString(label + "\n")
 	}
-	sidebar := sidebarStyle.Render(strings.TrimRight(sb.String(), "\n"))
 
-	// ── Viewport ──────────────────────────────────────────────────────────
-	// No border of its own — the outer box provides top/bottom/right edges.
-	viewport := lipgloss.NewStyle().
-		Width(m.vp.Width).
-		Height(innerH).
-		Render(m.vp.View())
+	// ── Sidebar card ──────────────────────────────────────────────────────
+	sidebarContent := strings.TrimRight(sb.String(), "\n")
+	var sidebarCard string
+	if m.cfg.LabelsEnabled() {
+		sidebarCard = renderCardWithTitle(sidebarContent, " processes ", sidebarWidth, innerH, sidebarFocused, false)
+	} else {
+		sidebarCard = cardBorder(sidebarFocused, false).Width(sidebarWidth).Height(innerH).Render(sidebarContent)
+	}
 
-	// ── Outer box ─────────────────────────────────────────────────────────
-	// Wraps sidebar+viewport in a single border. When labels are enabled we
-	// build a custom Border whose Top string embeds the pane titles so that
-	// no content rows are consumed by labels.
-	outerW := m.width - 2 // subtract outer left + right border
-	inner := lipgloss.JoinHorizontal(lipgloss.Top, sidebar, viewport)
-	b := m.buildBorder(outerW)
-	outer := lipgloss.NewStyle().
-		Width(outerW).
-		BorderStyle(b).
-		BorderForeground(colorBorder).
-		Render(inner)
+	// ── Viewport card ─────────────────────────────────────────────────────
+	vpContent := lipgloss.NewStyle().Width(m.vp.Width).Height(innerH).Render(m.vp.View())
+	var vpCard string
+	if m.cfg.LabelsEnabled() {
+		title := m.selectedID()
+		if title == "" {
+			title = "logs"
+		}
+		vpCard = renderCardWithTitle(vpContent, " "+title+" ", m.vp.Width, innerH, viewportFocused, m.selecting)
+	} else {
+		vpCard = cardBorder(viewportFocused, m.selecting).Width(m.vp.Width).Height(innerH).Render(vpContent)
+	}
 
-	return outer
+	return lipgloss.JoinHorizontal(lipgloss.Top, sidebarCard, vpCard)
 }
 
-// buildBorder returns a lipgloss.Border for the outer body box.
-// When labels are enabled the Top field is replaced with a pre-built string
-// that embeds "─ processes ─┬─ <procname> ─" into the top border line.
-// lipgloss uses the Top string as a tile source — because our string is
-// already exactly outerW runes wide it is used verbatim with no tiling.
-func (m Model) buildBorder(outerW int) lipgloss.Border {
+// renderCardWithTitle renders a card with a full border and a title embedded
+// in the top border line. lipgloss tiles b.Top as a repeating fill character,
+// so we pad the title to exactly innerW runes with "─" — that way the string
+// is consumed verbatim with no repetition.
+func renderCardWithTitle(content, title string, innerW, innerH int, focused, selecting bool) string {
 	b := lipgloss.NormalBorder()
-	if !m.cfg.LabelsEnabled() {
-		return b
+	titleRunes := []rune(title)
+	padLen := innerW - len(titleRunes)
+	if padLen < 0 {
+		titleRunes = titleRunes[:innerW]
+		padLen = 0
+	}
+	b.Top = string(titleRunes) + strings.Repeat(b.Top, padLen)
+
+	borderColor := lipgloss.TerminalColor(colorBorder)
+	switch {
+	case selecting:
+		borderColor = colorBorderSelect
+	case focused:
+		borderColor = colorBorderFocused
 	}
 
-	leftW := sidebarWidth // includes the divider │ column
-	rightW := outerW - leftW
-
-	// Left segment: "─ processes ─────" padded to leftW runes.
-	const sidebarTitle = " processes "
-	leftSeg := buildTitleSegment(sidebarTitle, leftW, b.Top)
-
-	// Right segment: " <procname> ─────" padded to rightW runes.
-	procName := m.selectedID()
-	if procName == "" {
-		procName = "logs"
-	}
-	rightSeg := buildTitleSegment(" "+procName+" ", rightW, b.Top)
-
-	b.Top = leftSeg + rightSeg
-	return b
-}
-
-// buildTitleSegment builds a border segment of exactly width runes consisting
-// of a title string centred (left-biased) in a field of fill characters.
-func buildTitleSegment(title string, width int, fill string) string {
-	titleW := len([]rune(title))
-	dashW := width - titleW
-	if dashW < 0 {
-		// Title longer than segment — truncate.
-		return string([]rune(title)[:width])
-	}
-	left := dashW / 2
-	right := dashW - left
-	return strings.Repeat(fill, left) + title + strings.Repeat(fill, right)
+	return lipgloss.NewStyle().
+		Width(innerW).
+		Height(innerH).
+		BorderStyle(b).
+		BorderForeground(borderColor).
+		Render(content)
 }
 
 // renderFooter renders the help bar at the bottom of the screen.
@@ -578,11 +660,12 @@ func (m Model) bodyHeight() int {
 // resizeViewport recalculates the viewport dimensions after a terminal resize
 // or help-bar toggle.
 func (m *Model) resizeViewport() {
-	// Outer box: 2 border cols (left+right).
-	// Sidebar: sidebarWidth cols + 1 divider border col.
-	vpWidth := m.width - sidebarWidth - 3
-	// Outer box: 2 border rows (top+bottom).
-	// Labels are in the border itself — no content rows deducted.
+	// Two cards side by side, each with a 2-col border (left+right).
+	// sidebar card total width = sidebarWidth + 2 borders.
+	// viewport card total width = remaining width.
+	// The 1-col gap between cards comes for free since each has its own border.
+	vpWidth := m.width - (sidebarWidth + 2) - 2
+	// Each card has its own top + bottom border row.
 	vpHeight := m.bodyHeight() - 2
 
 	if vpWidth < 1 {
@@ -596,7 +679,8 @@ func (m *Model) resizeViewport() {
 	m.vp.Height = vpHeight
 }
 
-// refreshViewport repopulates the viewport with the current process's output.
+// refreshViewport repopulates the viewport with the current process's output,
+// painting the cursor line and selection range on top of highlight colours.
 func (m *Model) refreshViewport() {
 	id := m.selectedID()
 	if id == "" || m.manager == nil {
@@ -616,11 +700,25 @@ func (m *Model) refreshViewport() {
 		return
 	}
 
-	// Apply highlight rules.
+	// Clamp cursor so it stays valid as output grows or shrinks.
+	m.cursorLine = clamp(m.cursorLine, 0, len(lines)-1)
+
+	lo := min(m.selAnchor, m.cursorLine)
+	hi := max(m.selAnchor, m.cursorLine)
+
 	procCfg := m.cfg.Processes[id]
+	vpFocused := m.focus == focusViewport
+
 	rendered := make([]string, len(lines))
 	for i, line := range lines {
-		rendered[i] = applyHighlight(line, procCfg.Highlight)
+		line = applyHighlight(line, procCfg.Highlight)
+		switch {
+		case m.selecting && i >= lo && i <= hi:
+			line = StyleSelectedLine.Width(m.vp.Width).Render(line)
+		case vpFocused && i == m.cursorLine:
+			line = StyleCursorLine.Render(line)
+		}
+		rendered[i] = line
 	}
 
 	m.vp.SetContent(strings.Join(rendered, "\n"))
@@ -753,6 +851,24 @@ func clamp(v, lo, hi int) int {
 		return hi
 	}
 	return v
+}
+
+func min(a, b int) int {
+	if a < b {
+		return a
+	}
+	return b
+}
+
+func max(a, b int) int {
+	if a > b {
+		return a
+	}
+	return b
+}
+
+func base64Encode(s string) string {
+	return base64.StdEncoding.EncodeToString([]byte(s))
 }
 
 // sortStrings sorts a slice of strings in-place (insertion sort, small N).

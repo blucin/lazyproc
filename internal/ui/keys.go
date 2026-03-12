@@ -25,6 +25,11 @@ type KeyMap struct {
 	// ── Worktree ─────────────────────────────────────────────────────────────
 	Worktree key.Binding // w — open worktree switcher
 
+	// ── Selection ────────────────────────────────────────────────────────────
+	Select key.Binding // v — enter/exit selection mode
+	Yank   key.Binding // y — copy selected lines via OSC 52
+	Escape key.Binding // esc — cancel selection mode
+
 	// ── Search (later stage) ─────────────────────────────────────────────────
 	Search key.Binding // / — open search input
 
@@ -38,19 +43,19 @@ func DefaultKeyMap() KeyMap {
 	return KeyMap{
 		Up: key.NewBinding(
 			key.WithKeys("up", "k"),
-			key.WithHelp("↑/k", "scroll up"),
+			key.WithHelp("↑/k", "up"),
 		),
 		Down: key.NewBinding(
 			key.WithKeys("down", "j"),
-			key.WithHelp("↓/j", "scroll down"),
+			key.WithHelp("↓/j", "down"),
 		),
 		PageUp: key.NewBinding(
 			key.WithKeys("pgup", "ctrl+u"),
-			key.WithHelp("pgup/ctrl+u", "page up"),
+			key.WithHelp("^u", "pg up"),
 		),
 		PageDown: key.NewBinding(
 			key.WithKeys("pgdown", "ctrl+d"),
-			key.WithHelp("pgdn/ctrl+d", "page down"),
+			key.WithHelp("^d", "pg down"),
 		),
 		GotoTop: key.NewBinding(
 			key.WithKeys("g"),
@@ -63,7 +68,7 @@ func DefaultKeyMap() KeyMap {
 
 		FocusNext: key.NewBinding(
 			key.WithKeys("tab"),
-			key.WithHelp("tab", "switch pane"),
+			key.WithHelp("tab", "focus"),
 		),
 
 		Start: key.NewBinding(
@@ -80,17 +85,30 @@ func DefaultKeyMap() KeyMap {
 		),
 		Clear: key.NewBinding(
 			key.WithKeys("c"),
-			key.WithHelp("c", "clear output"),
+			key.WithHelp("c", "clear"),
+		),
+
+		Select: key.NewBinding(
+			key.WithKeys("v"),
+			key.WithHelp("v", "select"),
+		),
+		Yank: key.NewBinding(
+			key.WithKeys("y"),
+			key.WithHelp("y", "copy"),
+		),
+		Escape: key.NewBinding(
+			key.WithKeys("esc"),
+			key.WithHelp("esc", "cancel"),
 		),
 
 		Worktree: key.NewBinding(
 			key.WithKeys("w"),
-			key.WithHelp("w", "switch worktree"),
+			key.WithHelp("w", "worktree"),
 		),
 
 		Search: key.NewBinding(
 			key.WithKeys("/"),
-			key.WithHelp("/", "search output"),
+			key.WithHelp("/", "search"),
 		),
 
 		Quit: key.NewBinding(
@@ -99,7 +117,7 @@ func DefaultKeyMap() KeyMap {
 		),
 		Help: key.NewBinding(
 			key.WithKeys("?"),
-			key.WithHelp("?", "toggle help"),
+			key.WithHelp("?", "help"),
 		),
 	}
 }
@@ -111,7 +129,10 @@ func (k KeyMap) ShortHelp() []key.Binding {
 		k.Up,
 		k.Down,
 		k.FocusNext,
+		k.Select,
+		k.Yank,
 		k.Restart,
+		k.Worktree,
 		k.Quit,
 		k.Help,
 	}
@@ -139,6 +160,8 @@ func (k KeyMap) FullHelp() [][]key.Binding {
 		},
 		// Column 3 — application
 		{
+			k.Select,
+			k.Yank,
 			k.FocusNext,
 			k.Worktree,
 			k.Search,

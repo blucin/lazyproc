@@ -6,9 +6,11 @@ import "github.com/charmbracelet/lipgloss"
 // Using adaptive colours so the UI looks reasonable on both light and dark
 // terminals.
 var (
-	colorSubtle    = lipgloss.AdaptiveColor{Light: "#666666", Dark: "#6C7086"}
-	colorHighlight = lipgloss.AdaptiveColor{Light: "#0066CC", Dark: "#89B4FA"}
-	colorBorder    = lipgloss.AdaptiveColor{Light: "#CCCCCC", Dark: "#313244"}
+	colorSubtle        = lipgloss.AdaptiveColor{Light: "#666666", Dark: "#6C7086"}
+	colorHighlight     = lipgloss.AdaptiveColor{Light: "#0066CC", Dark: "#89B4FA"}
+	colorBorder        = lipgloss.AdaptiveColor{Light: "#CCCCCC", Dark: "#313244"}
+	colorBorderFocused = lipgloss.AdaptiveColor{Light: "#0066CC", Dark: "#89B4FA"}
+	colorBorderSelect  = lipgloss.AdaptiveColor{Light: "#CC8800", Dark: "#F9E2AF"}
 
 	// Status dot colours.
 	colorStopped    = lipgloss.AdaptiveColor{Light: "#888888", Dark: "#6C7086"}
@@ -22,6 +24,20 @@ var (
 // ── Layout dimensions ───────────────────────────────────────────────────────
 
 const sidebarWidth = 28
+
+// cardBorder returns a normal border styled for focused, selecting, or unfocused state.
+func cardBorder(focused, selecting bool) lipgloss.Style {
+	color := lipgloss.TerminalColor(colorBorder)
+	switch {
+	case selecting:
+		color = colorBorderSelect
+	case focused:
+		color = colorBorderFocused
+	}
+	return lipgloss.NewStyle().
+		BorderStyle(lipgloss.NormalBorder()).
+		BorderForeground(color)
+}
 
 // ── Sidebar ──────────────────────────────────────────────────────────────────
 
@@ -45,6 +61,21 @@ var (
 	StyleDotReady      = lipgloss.NewStyle().Foreground(colorReady)
 	StyleDotCrashed    = lipgloss.NewStyle().Foreground(colorCrashed)
 	StyleDotRestarting = lipgloss.NewStyle().Foreground(colorRestarting)
+)
+
+// ── Cursor / selection ────────────────────────────────────────────────────────
+
+var (
+	// Subtle background tint on the cursor line when viewport is focused.
+	// We avoid Foreground/Underline here because the line already carries ANSI
+	// codes from applyHighlight — layering another fg style produces broken
+	// escape sequences. Background-only is safe on pre-styled text.
+	StyleCursorLine = lipgloss.NewStyle().
+			Background(lipgloss.AdaptiveColor{Light: "#DDEEFF", Dark: "#313244"})
+
+	// Stronger background for lines inside an active selection.
+	StyleSelectedLine = lipgloss.NewStyle().
+				Background(lipgloss.AdaptiveColor{Light: "#CCE5FF", Dark: "#45475A"})
 )
 
 // ── Output line highlight colours ────────────────────────────────────────────
