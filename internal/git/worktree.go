@@ -3,7 +3,9 @@ package git
 import (
 	"bytes"
 	"fmt"
+	"os"
 	"os/exec"
+	"path/filepath"
 	"strings"
 )
 
@@ -49,6 +51,17 @@ func RepoRoot(cwd string) (string, error) {
 func IsGitRepo(cwd string) bool {
 	_, err := RepoRoot(cwd)
 	return err == nil
+}
+
+// IsWorktreeRoot reports whether dir is the root of a git worktree
+func IsWorktreeRoot(dir string) bool {
+	info, err := os.Stat(filepath.Join(dir, ".git"))
+	if err != nil {
+		return false
+	}
+	// Accept both a .git directory (main worktree) and a .git file (linked
+	// worktree created by `git worktree add`).
+	return info.IsDir() || info.Mode().IsRegular()
 }
 
 // ListWorktrees returns all worktrees for the repository that contains cwd.

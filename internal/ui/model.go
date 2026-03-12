@@ -2,6 +2,7 @@ package ui
 
 import (
 	"fmt"
+	"path/filepath"
 	"strings"
 	"time"
 
@@ -153,6 +154,38 @@ func (m *Model) selectedID() string {
 	return m.procIDs[m.selectedIdx]
 }
 
+// selectedCwd returns the absolute working directory of the currently selected
+// process. Relative paths from the config are resolved against the current
+// working directory (which is where lazyproc was launched from). Returns "."
+// if there is no selection or the cwd is empty.
+func (m *Model) selectedCwd() string {
+	id := m.selectedID()
+	if id == "" {
+		return "."
+	}
+	if p := m.manager.Get(id); p != nil {
+		cwd := p.Cwd()
+		if cwd == "" {
+			return "."
+		}
+		if filepath.IsAbs(cwd) {
+			return cwd
+		}
+		// Resolve relative paths so git commands always receive an absolute
+		// path and don't accidentally walk up into a parent repo.
+		if abs, err := filepath.Abs(cwd); err == nil {
+			return abs
+		}
+		return cwd
+	}
+	return "."
+}
+
+// redetectGitCmd is a convenience wrapper that fires detectGitCmd rooted at
+func (m *Model) redetectGitCmd() tea.Cmd {
+	return detectGitCmd(m.selectedCwd())
+}
+
 // ── Init ──────────────────────────────────────────────────────────────────────
 
 // Init is called once by Bubbletea before the first render.
@@ -162,7 +195,7 @@ func (m Model) Init() tea.Cmd {
 		tickCmd(),
 		listenCmd(m.msgCh),
 		startAllCmd(m.manager),
-		detectGitCmd(),
+		detectGitCmd(m.selectedCwd()),
 	)
 }
 
@@ -280,6 +313,7 @@ func (m *Model) handleKey(msg tea.KeyMsg) tea.Cmd {
 	case keyMatches(msg, m.keys.Up):
 		if m.focus == focusSidebar {
 			m.moveSidebar(-1)
+			return m.redetectGitCmd()
 		} else {
 			m.vp.LineUp(1)
 			m.autoScroll = false
@@ -288,6 +322,7 @@ func (m *Model) handleKey(msg tea.KeyMsg) tea.Cmd {
 	case keyMatches(msg, m.keys.Down):
 		if m.focus == focusSidebar {
 			m.moveSidebar(1)
+			return m.redetectGitCmd()
 		} else {
 			m.vp.LineDown(1)
 			// Re-enable auto-scroll when the user scrolls to the bottom.
@@ -644,17 +679,22 @@ func startAllCmd(mgr *process.Manager) tea.Cmd {
 	}
 }
 
-// detectGitCmd runs git detection in the background and sends a gitDetectMsg
-// back to the event loop. It never returns an error — if git is unavailable
-// or CWD is not a repo, isGitRepo is simply false.
-func detectGitCmd() tea.Cmd {
+// detectGitCmd runs git detection in the background rooted at cwd (the
+// selected process's working directory) and sends a gitDetectMsg back to the
+// event loop.
+func detectGitCmd(cwd string) tea.Cmd {
 	return func() tea.Msg {
-		worktrees, err := git.ListWorktrees(".")
+		worktrees, err := git.ListWorktrees(cwd)
 		if err != nil {
 			return gitDetectMsg{isGitRepo: false}
 		}
-		current, err := git.CurrentWorktree(".")
+		current, err := git.CurrentWorktree(cwd)
 		if err != nil {
+			return gitDetectMsg{isGitRepo: false}
+		}
+		// Guard against the process cwd sitting inside some unrelated parent
+		// git repo (e.g. test scripts living inside the lazyproc source tree).
+		if !git.IsWorktreeRoot(cwd) {
 			return gitDetectMsg{isGitRepo: false}
 		}
 		return gitDetectMsg{
@@ -665,15 +705,15 @@ func detectGitCmd() tea.Cmd {
 	}
 }
 
-// switchWorktreeCmd stops all processes, switches the worktree CWD, restarts
-// live processes, then returns a gitDetectMsg so Update can update the model's
-// git state cleanly without any shared-memory mutation from a goroutine.
+// switchWorktreeCmd stops all processes, switches to newPath, restarts live
+// processes, then re-detects git state from newPath so the header and picker
+// stay current.
 func switchWorktreeCmd(mgr *process.Manager, newPath string) tea.Cmd {
 	return func() tea.Msg {
 		if err := mgr.SwitchWorktree(newPath); err != nil {
 			return errMsg{err}
 		}
-		// Re-list all worktrees from the new path so the picker stays current.
+		// Re-list all worktrees from the new worktree path so the picker stays current.
 		worktrees, err := git.ListWorktrees(newPath)
 		if err != nil {
 			return errMsg{err}
