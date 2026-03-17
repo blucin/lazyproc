@@ -90,7 +90,7 @@ func DefaultKeyMap() KeyMap {
 
 		Select: key.NewBinding(
 			key.WithKeys("v"),
-			key.WithHelp("v", "select"),
+			key.WithHelp("v", "reset select"),
 		),
 		Yank: key.NewBinding(
 			key.WithKeys("y"),
@@ -98,7 +98,7 @@ func DefaultKeyMap() KeyMap {
 		),
 		Escape: key.NewBinding(
 			key.WithKeys("esc"),
-			key.WithHelp("esc", "cancel"),
+			key.WithHelp("esc", "exit select mode"),
 		),
 
 		Worktree: key.NewBinding(
@@ -122,18 +122,26 @@ func DefaultKeyMap() KeyMap {
 	}
 }
 
-// ShortHelp returns the condensed set of bindings shown in the compact help bar.
-// Implements the help.KeyMap interface from bubbles/help.
+// ShortHelp returns the condensed set of bindings shown in normal mode.
 func (k KeyMap) ShortHelp() []key.Binding {
 	return []key.Binding{
 		k.Up,
 		k.Down,
 		k.FocusNext,
 		k.Select,
-		k.Yank,
 		k.Restart,
 		k.Worktree,
 		k.Quit,
+		k.Help,
+	}
+}
+
+// ShortHelpVisual returns the condensed set of bindings shown in visual mode.
+func (k KeyMap) ShortHelpVisual() []key.Binding {
+	return []key.Binding{
+		k.Escape,
+		k.Select,
+		k.Yank,
 		k.Help,
 	}
 }
@@ -161,11 +169,22 @@ func (k KeyMap) FullHelp() [][]key.Binding {
 		// Column 3 — application
 		{
 			k.Select,
-			k.Yank,
 			k.FocusNext,
 			k.Worktree,
 			k.Search,
 			k.Quit,
+			k.Help,
+		},
+	}
+}
+
+// FullHelpVisual returns the full help layout used while in visual mode.
+func (k KeyMap) FullHelpVisual() [][]key.Binding {
+	return [][]key.Binding{
+		{
+			k.Escape,
+			k.Select,
+			k.Yank,
 			k.Help,
 		},
 	}

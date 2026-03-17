@@ -355,11 +355,16 @@ func (m *Model) handleKey(msg tea.KeyMsg) tea.Cmd {
 	case keyMatches(msg, m.keys.Select):
 		if m.focus == focusViewport {
 			if m.selecting {
-				m.selecting = false
+				// Keep visual mode active; reset anchor to current cursor so users
+				// can quickly start a new selection without leaving the mode.
+				m.selAnchor = m.cursorLine
 			} else {
 				m.selecting = true
 				m.selAnchor = m.cursorLine
 			}
+			// Entering visual mode (or resetting selection inside it) pauses follow.
+			m.autoScroll = false
+			m.scrollToCursor()
 			m.refreshViewport()
 		}
 
@@ -370,7 +375,9 @@ func (m *Model) handleKey(msg tea.KeyMsg) tea.Cmd {
 
 	case keyMatches(msg, m.keys.Escape):
 		m.selecting = false
+		m.autoScroll = true
 		m.refreshViewport()
+		m.vp.GotoBottom()
 
 	// ── Process control ───────────────────────────────────────────────────────
 	case keyMatches(msg, m.keys.Start):
@@ -417,7 +424,8 @@ func (m *Model) moveCursor(delta int) {
 		return
 	}
 	m.cursorLine = clamp(m.cursorLine+delta, 0, n-1)
-	m.autoScroll = m.cursorLine == n-1
+	// Cursor movement alone must not disable follow mode.
+	// Follow is paused/resumed only by entering/exiting visual mode.
 	m.scrollToCursor()
 	m.refreshViewport()
 }
@@ -464,7 +472,9 @@ func (m *Model) yankSelection() tea.Cmd {
 
 	selected := strings.Join(lines[lo:hi+1], "\n")
 	m.selecting = false
+	m.autoScroll = true
 	m.refreshViewport()
+	m.vp.GotoBottom()
 	return osc52Cmd(selected)
 }
 
@@ -628,12 +638,22 @@ func (m Model) renderFooter() string {
 	if !m.cfg.HelpEnabled() {
 		return ""
 	}
+
 	var helpView string
-	if m.showHelp {
-		helpView = m.help.View(m.keys)
+	if m.selecting {
+		if m.showHelp {
+			helpView = m.help.FullHelpView(m.keys.FullHelpVisual())
+		} else {
+			helpView = m.help.ShortHelpView(m.keys.ShortHelpVisual())
+		}
 	} else {
-		helpView = m.help.ShortHelpView(m.keys.ShortHelp())
+		if m.showHelp {
+			helpView = m.help.View(m.keys)
+		} else {
+			helpView = m.help.ShortHelpView(m.keys.ShortHelp())
+		}
 	}
+
 	return StyleHelp.Width(m.width).Render(helpView)
 }
 
