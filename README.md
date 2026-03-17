@@ -17,9 +17,9 @@ A terminal UI process orchestrator for multi-process projects, with git worktree
 | `c`                 | Clear output buffer                                 |
 | `g` / `G`           | Jump to top / bottom of output                      |
 | `ctrl+u` / `ctrl+d` | Page up / page down                                 |
-| `v`                 | Enter selection mode (anchor at cursor line)        |
-| `y`                 | Copy selected lines to clipboard (OSC 52)           |
-| `esc`               | Cancel selection mode                               |
+| `v`                 | Enter visual mode (pause autoscroll; anchor at cursor) |
+| `y`                 | Copy selected lines (visual mode only; exits visual mode and resumes autoscroll) |
+| `esc`               | Exit visual mode (resume autoscroll)                |
 | `w`                 | Open worktree switcher (git repos only)             |
 | `?`                 | Toggle full help                                    |
 | `q` / `ctrl+c`      | Quit                                                |
