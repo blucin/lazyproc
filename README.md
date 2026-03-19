@@ -36,6 +36,64 @@ lazyproc
 lazyproc --labels "Frontend,Logs" "npm run dev" "tail -f log.txt"
 ```
 
+## Contents
+
+- [Installation](#installation)
+- [Building](#building)
+- [Quick Start](#quick-start)
+- [How It Works](#how-it-works)
+- [Keybindings](#keybindings)
+- [Configuration](#configuration)
+- [Similar Projects](#similar-projects)
+
+## Installation
+
+**From source (all platforms):**
+
+```bash
+go install github.com/blucin/lazyproc/cmd/lazyproc@latest
+```
+
+**Homebrew (macOS):**
+
+```bash
+brew tap blucin/tap
+brew install lazyproc
+```
+
+**Linux packages (deb/rpm/apk):**
+
+Download from the [latest release](https://github.com/blucin/lazyproc/releases/latest).
+
+## Building
+
+Clone the repo:
+
+```bash
+git clone https://github.com/blucin/lazyproc.git
+cd lazyproc
+```
+
+Build locally:
+
+```bash
+make build
+./bin/lazyproc
+```
+
+Or install directly:
+
+```bash
+make install
+lazyproc
+```
+
+Clean build artifacts:
+
+```bash
+make clean
+```
+
 ## How It Works
 
 Processes start in dependency order. Each waits for its `depends_on` targets to reach ready state before starting.
