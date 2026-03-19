@@ -18,7 +18,7 @@ builds:
       - CGO_ENABLED=0
     goos:
       - linux
-      - windows
+      # - windows (build fails, need to write process.go with windows support - maybe later)
       - darwin
     goarch:
       - amd64
