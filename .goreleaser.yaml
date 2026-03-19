@@ -46,7 +46,7 @@ changelog:
       - "^test:"
       - "^chore:"
 
-brews:
+homebrew_casks:
   - name: lazyproc
     homepage: "https://github.com/blucin/lazyproc"
     description: "A TUI process orchestrator with git worktree support"
