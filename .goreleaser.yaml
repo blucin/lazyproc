@@ -54,7 +54,7 @@ brews:
     repository:
       owner: blucin
       name: homebrew-tap
-      token: "{{ .Env.GITHUB_TOKEN }}"
+      token: "{{ .Env.TAP_TOKEN }}"
 
 nfpms:
   - package_name: lazyproc
