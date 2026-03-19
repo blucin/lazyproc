@@ -38,6 +38,9 @@ type Settings struct {
 	// ShowLabels controls whether the "processes" / process-name label row
 	// is rendered inside each pane. Defaults to true when omitted from config.
 	ShowLabels *bool `yaml:"show_labels"`
+
+	// ProcessListTitle is the title for the processes pane.
+	ProcessListTitle string `yaml:"process_list_title"`
 }
 
 // Config is the top-level structure parsed from lazyproc.yaml.
@@ -61,6 +64,9 @@ func (c *Config) defaults() {
 	if c.Settings.ShowLabels == nil {
 		t := true
 		c.Settings.ShowLabels = &t
+	}
+	if c.Settings.ProcessListTitle == "" {
+		c.Settings.ProcessListTitle = "processes"
 	}
 }
 
@@ -105,6 +111,47 @@ func Load(path string) (*Config, error) {
 
 	if err := cfg.validate(); err != nil {
 		return nil, fmt.Errorf("invalid config: %w", err)
+	}
+
+	return &cfg, nil
+}
+
+// FromArgs constructs a Config from CLI arguments.
+func FromArgs(commands []string, names []string, title string) (*Config, error) {
+	processes := make(map[string]Process)
+	for i, cmd := range commands {
+		name := cmd
+		if i < len(names) && names[i] != "" {
+			name = names[i]
+		}
+
+		// Ensure unique process name if duplicated
+		originalName := name
+		counter := 1
+		for {
+			if _, exists := processes[name]; !exists {
+				break
+			}
+			name = fmt.Sprintf("%s-%d", originalName, counter)
+			counter++
+		}
+
+		processes[name] = Process{
+			Cmd: cmd,
+		}
+	}
+
+	cfg := Config{
+		Settings: Settings{
+			ProcessListTitle: title,
+		},
+		Processes: processes,
+	}
+
+	cfg.defaults()
+
+	if err := cfg.validate(); err != nil {
+		return nil, fmt.Errorf("invalid config from args: %w", err)
 	}
 
 	return &cfg, nil

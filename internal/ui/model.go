@@ -141,12 +141,18 @@ func NewModel(cfg *config.Config) Model {
 		msgCh <- ProcessOutputMsg{ID: id, Line: line}
 	}
 
+	h := help.New()
+	h.Styles.ShortKey = StyleHelpKey
+	h.Styles.ShortDesc = StyleHelpDesc
+	h.Styles.FullKey = StyleHelpKey
+	h.Styles.FullDesc = StyleHelpDesc
+
 	m := Model{
 		cfg:        cfg,
 		manager:    process.NewManager(cfg, onState, onOutput),
 		msgCh:      msgCh,
 		keys:       DefaultKeyMap(),
-		help:       help.New(),
+		help:       h,
 		autoScroll: true,
 		focus:      focusSidebar,
 	}
@@ -526,6 +532,12 @@ func (m Model) View() string {
 		return overlayStrings(base, overlay)
 	}
 
+	if m.showHelp {
+		helpView := m.help.FullHelpView(m.keys.FullHelp())
+		overlay := lipgloss.Place(m.width, m.height, lipgloss.Center, lipgloss.Center, StyleModal.Render(helpView))
+		return overlayStrings(base, overlay)
+	}
+
 	return base
 }
 
@@ -581,7 +593,7 @@ func (m Model) renderBody() string {
 	sidebarContent := strings.TrimRight(sb.String(), "\n")
 	var sidebarCard string
 	if m.cfg.LabelsEnabled() {
-		sidebarCard = renderCardWithTitle(sidebarContent, " processes ", sidebarWidth, innerH, sidebarFocused, false)
+		sidebarCard = renderCardWithTitle(sidebarContent, " "+m.cfg.Settings.ProcessListTitle+" ", sidebarWidth, innerH, sidebarFocused, false)
 	} else {
 		sidebarCard = cardBorder(sidebarFocused, false).Width(sidebarWidth).Height(innerH).Render(sidebarContent)
 	}
@@ -641,17 +653,9 @@ func (m Model) renderFooter() string {
 
 	var helpView string
 	if m.selecting {
-		if m.showHelp {
-			helpView = m.help.FullHelpView(m.keys.FullHelpVisual())
-		} else {
-			helpView = m.help.ShortHelpView(m.keys.ShortHelpVisual())
-		}
+		helpView = m.help.ShortHelpView(m.keys.ShortHelpVisual())
 	} else {
-		if m.showHelp {
-			helpView = m.help.View(m.keys)
-		} else {
-			helpView = m.help.ShortHelpView(m.keys.ShortHelp())
-		}
+		helpView = m.help.ShortHelpView(m.keys.ShortHelp())
 	}
 
 	return StyleHelp.Width(m.width).Render(helpView)
@@ -664,11 +668,7 @@ func (m Model) renderFooter() string {
 func (m Model) bodyHeight() int {
 	footerLines := 0
 	if m.cfg.HelpEnabled() {
-		if m.showHelp {
-			footerLines = 4
-		} else {
-			footerLines = 1
-		}
+		footerLines = 1
 	}
 	h := m.height - footerLines
 	if h < 1 {

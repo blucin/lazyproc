@@ -4,6 +4,7 @@ import (
 	"flag"
 	"fmt"
 	"os"
+	"strings"
 
 	"github.com/blucin/lazyproc/internal/config"
 	"github.com/blucin/lazyproc/internal/ui"
@@ -21,9 +22,29 @@ func main() {
 	}
 
 	configPath := flag.String("config", "lazyproc.yaml", "path to config file")
+	title := flag.String("title", "", "title for the process list")
+	labels := flag.String("labels", "", "comma-separated labels for the processes")
 	flag.Parse()
 
-	cfg, err := config.Load(*configPath)
+	var cfg *config.Config
+	var err error
+
+	if len(flag.Args()) > 0 {
+		var labelSlice []string
+		if *labels != "" {
+			labelSlice = strings.Split(*labels, ",")
+			for i := range labelSlice {
+				labelSlice[i] = strings.TrimSpace(labelSlice[i])
+			}
+		}
+		cfg, err = config.FromArgs(flag.Args(), labelSlice, *title)
+	} else {
+		cfg, err = config.Load(*configPath)
+		if err == nil && *title != "" {
+			cfg.Settings.ProcessListTitle = *title
+		}
+	}
+
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "error loading config: %v\n", err)
 		os.Exit(1)

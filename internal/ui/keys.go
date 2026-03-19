@@ -169,6 +169,8 @@ func (k KeyMap) FullHelp() [][]key.Binding {
 		// Column 3 — application
 		{
 			k.Select,
+			k.Yank,
+			k.Escape,
 			k.FocusNext,
 			k.Worktree,
 			k.Search,
@@ -180,12 +182,5 @@ func (k KeyMap) FullHelp() [][]key.Binding {
 
 // FullHelpVisual returns the full help layout used while in visual mode.
 func (k KeyMap) FullHelpVisual() [][]key.Binding {
-	return [][]key.Binding{
-		{
-			k.Escape,
-			k.Select,
-			k.Yank,
-			k.Help,
-		},
-	}
+	return k.FullHelp()
 }
