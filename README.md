@@ -41,6 +41,7 @@ lazyproc --labels "Frontend,Logs" "npm run dev" "tail -f log.txt"
 Processes start in dependency order. Each waits for its `depends_on` targets to reach ready state before starting.
 
 Process status in the sidebar:
+
 - Yellow: starting
 - Blue: running
 - Green: ready
@@ -51,23 +52,23 @@ Press `w` to switch git worktrees. All running processes stop, working directori
 
 ## Keybindings
 
-| Key | Action |
-|-----|--------|
-| `j` or `Down` | Down |
-| `k` or `Up` | Up |
-| `Tab` | Toggle sidebar/output focus |
-| `s` | Start process |
-| `x` | Stop process |
-| `r` | Restart process |
-| `c` | Clear output |
-| `g` or `G` | Jump to top or bottom |
-| `Ctrl+u` or `Ctrl+d` | Page up or down |
-| `v` | Enter visual mode (disable autoscroll) |
-| `y` | Copy selected lines (visual mode only) |
-| `Esc` | Exit visual mode |
-| `w` | Switch worktree |
-| `?` | Show help |
-| `q` or `Ctrl+c` | Quit |
+| Key                  | Action                                 |
+| -------------------- | -------------------------------------- |
+| `j` or `Down`        | Down                                   |
+| `k` or `Up`          | Up                                     |
+| `Tab`                | Toggle sidebar/output focus            |
+| `s`                  | Start process                          |
+| `x`                  | Stop process                           |
+| `r`                  | Restart process                        |
+| `c`                  | Clear output                           |
+| `g` or `G`           | Jump to top or bottom                  |
+| `Ctrl+u` or `Ctrl+d` | Page up or down                        |
+| `v`                  | Enter visual mode (disable autoscroll) |
+| `y`                  | Copy selected lines (visual mode only) |
+| `Esc`                | Exit visual mode                       |
+| `w`                  | Switch worktree                        |
+| `?`                  | Show help                              |
+| `q` or `Ctrl+c`      | Quit                                   |
 
 ## Configuration
 
