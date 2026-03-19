@@ -1,6 +1,3 @@
-# This is an example .goreleaser.yml file with some sensible defaults.
-# Make sure to check the documentation at https://goreleaser.com
-
 # The lines below are called `modelines`. See `:help modeline`
 # Feel free to remove those if you don't want/need to use them.
 # yaml-language-server: $schema=https://goreleaser.com/static/schema.json
@@ -48,6 +45,27 @@ changelog:
       - "^docs:"
       - "^test:"
       - "^chore:"
+
+brews:
+  - name: lazyproc
+    homepage: "https://github.com/blucin/lazyproc"
+    description: "A TUI process orchestrator with git worktree support"
+    license: "MIT"
+    repository:
+      owner: blucin
+      name: homebrew-tap
+      token: "{{ .Env.GITHUB_TOKEN }}"
+
+nfpms:
+  - package_name: lazyproc
+    homepage: "https://github.com/blucin/lazyproc"
+    description: "A TUI process orchestrator with git worktree support"
+    maintainer: "Akshar Patel <94466270+blucin@users.noreply.github.com>"
+    license: "MIT"
+    formats:
+      - deb
+      - rpm
+      - apk
 
 # Let's keep this :)
 release:
