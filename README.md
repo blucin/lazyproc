@@ -2,6 +2,8 @@
 
 A terminal UI process orchestrator for multi-process projects with git worktree support.
 
+![demo](./assets/demo.gif)
+
 ## Quick Start
 
 Create `lazyproc.yaml`:
@@ -53,6 +55,8 @@ lazyproc --labels "Frontend,Logs" "npm run dev" "tail -f log.txt"
 ```bash
 go install github.com/blucin/lazyproc/cmd/lazyproc@latest
 ```
+
+Ensure `$GOPATH/bin` is in your `PATH` to run `lazyproc` from anywhere.
 
 **Homebrew (macOS):**
 

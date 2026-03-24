@@ -20,6 +20,7 @@
           go-tools
           goreleaser
           air
+          # vhs - uncomment me if you want vhs for recording demo gifs
         ];
       };
     };
