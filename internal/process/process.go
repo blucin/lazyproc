@@ -143,7 +143,16 @@ func (p *Process) Start() error {
 		return fmt.Errorf("process %q is already running (state: %s)", p.ID, p.state)
 	}
 
-	return p.start()
+	err := p.start()
+	if err != nil {
+		p.setState(StateCrashed)
+		msg := fmt.Sprintf("[lazyproc error] Failed to start process: %v", err)
+		p.Output.Push(msg)
+		if p.onOutput != nil {
+			p.onOutput(p.ID, OutputLine{Text: msg, Timestamp: time.Now()})
+		}
+	}
+	return err
 }
 
 // start does the actual spawn work. Must be called with p.mu held.

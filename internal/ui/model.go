@@ -243,7 +243,7 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	// ── Worktree picker messages ──────────────────────────────────────────────
 	case worktreeSelectedMsg:
 		m.focus = focusSidebar
-		return m, switchWorktreeCmd(m.manager, msg.worktree.Path)
+		return m, switchWorktreeCmd(m.manager, m.currentWorktree.Path, msg.worktree.Path)
 
 	case worktreeDismissMsg:
 		m.focus = focusSidebar
@@ -826,9 +826,9 @@ func detectGitCmd(cwd string) tea.Cmd {
 // switchWorktreeCmd stops all processes, switches to newPath, restarts live
 // processes, then re-detects git state from newPath so the header and picker
 // stay current.
-func switchWorktreeCmd(mgr *process.Manager, newPath string) tea.Cmd {
+func switchWorktreeCmd(mgr *process.Manager, oldPath, newPath string) tea.Cmd {
 	return func() tea.Msg {
-		if err := mgr.SwitchWorktree(newPath); err != nil {
+		if err := mgr.SwitchWorktree(oldPath, newPath); err != nil {
 			return errMsg{err}
 		}
 		// Re-list all worktrees from the new worktree path so the picker stays current.

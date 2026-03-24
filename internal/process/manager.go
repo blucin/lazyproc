@@ -3,6 +3,7 @@ package process
 import (
 	"fmt"
 	"path/filepath"
+	"strings"
 	"sync"
 	"time"
 
@@ -28,6 +29,7 @@ type Manager struct {
 	// as it was at construction time. SwitchWorktree always resolves against
 	// this original value so that repeated switches don't compound paths.
 	originalCwd map[string]string
+	initialCwdAbs map[string]string
 }
 
 // NewManager constructs a Manager from the parsed config.
@@ -43,6 +45,7 @@ func NewManager(cfg *config.Config, onState StateChangeFunc, onOutput OutputFunc
 		shell:         cfg.Settings.Shell,
 		logCap:        cfg.Settings.LogLimit,
 		originalCwd:   make(map[string]string, len(cfg.Processes)),
+		initialCwdAbs: make(map[string]string, len(cfg.Processes)),
 	}
 
 	for id, pcfg := range cfg.Processes {
@@ -57,6 +60,13 @@ func NewManager(cfg *config.Config, onState StateChangeFunc, onOutput OutputFunc
 		// Snapshot the cwd exactly as written in the config before any
 		// runtime mutations occur.
 		m.originalCwd[id] = pcfg.Cwd
+		
+		absCwd, err := filepath.Abs(pcfg.Cwd)
+		if err == nil {
+			m.initialCwdAbs[id] = absCwd
+		} else {
+			m.initialCwdAbs[id] = pcfg.Cwd // fallback
+		}
 	}
 
 	return m
@@ -165,7 +175,7 @@ func (m *Manager) StopAll() {
 // If a process has a relative cwd defined in its config, it is re-joined
 // against the new worktree root so it still resolves correctly in the new
 // tree.
-func (m *Manager) SwitchWorktree(newRoot string) error {
+func (m *Manager) SwitchWorktree(oldRoot, newRoot string) error {
 	procs := m.Snapshot()
 
 	// Snapshot which processes were actively running before we stop anything.
@@ -199,27 +209,34 @@ func (m *Manager) SwitchWorktree(newRoot string) error {
 	// paths (e.g. switching twice would otherwise keep appending to an already-
 	// absolute path set by the previous switch).
 	m.mu.RLock()
-	origCwds := make(map[*Process]string, len(entries))
+	
+	absCwds := make(map[*Process]string, len(entries))
 	for id, p := range m.processes {
-		origCwds[p] = m.originalCwd[id]
+		
+		absCwds[p] = m.initialCwdAbs[id]
 	}
 	m.mu.RUnlock()
 
 	for _, e := range entries {
-		origCwd := origCwds[e.p]
+		absCwd := absCwds[e.p]
+		
 		var newCwd string
-		switch {
-		case origCwd == "":
-			// No cwd override in config — process runs at the worktree root.
-			newCwd = newRoot
-		case filepath.IsAbs(origCwd):
-			// Absolute path in config — leave it unchanged; it is not
-			// worktree-relative.
-			newCwd = origCwd
-		default:
-			// Relative path in config — re-join against the new worktree root.
-			newCwd = filepath.Join(newRoot, origCwd)
+		
+		rel, err := filepath.Rel(oldRoot, absCwd)
+		isSub := err == nil && rel != ".." && !strings.HasPrefix(rel, ".."+string(filepath.Separator))
+		
+		if isSub {
+			if rel == "." {
+				newCwd = newRoot
+			} else {
+				newCwd = filepath.Join(newRoot, rel)
+			}
+		} else {
+			// If the process's directory is outside the worktree being switched,
+			// it should just retain its absolute initial path.
+			newCwd = absCwd
 		}
+
 		e.p.SetCwd(newCwd)
 		e.p.ClearOutput()
 	}
@@ -275,7 +292,8 @@ func startOrdered(procs map[string]*Process) error {
 				st := p.State()
 				if st == StateStopped || st == StateCrashed {
 					if err := p.Start(); err != nil {
-						return fmt.Errorf("starting process %q: %w", id, err)
+						// Error is handled inside p.Start (state set to Crashed, output appended).
+						// We don't abort startOrdered so other processes can still start.
 					}
 				}
 				delete(remaining, id)
